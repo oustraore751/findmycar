@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voiture - FindMyCar</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="img/logo.svg" type="image/svg+xml">
+</head>
+<body>
+    <!-- Fiche d'une voiture (voiture.html?id=3) avec sa galerie photo -->
+
+    <div id="header"></div>
+
+    <main>
+        <p><a href="index.html">← Retour au catalogue</a></p>
+        <p id="message" role="alert"></p>
+
+        <div id="fiche" class="fiche" hidden>
+            <div id="galerie">
+                <div class="photo-principale">
+                    <img id="photo" alt="">
+                    <button type="button" class="fleche fleche-gauche" id="precedente" aria-label="Photo précédente">‹</button>
+                    <button type="button" class="fleche fleche-droite" id="suivante" aria-label="Photo suivante">›</button>
+                    <span class="compteur" id="compteur"></span>
+                </div>
+                <div class="miniatures" id="miniatures"></div>
+            </div>
+
+            <section class="fiche-infos">
+                <h1 id="nom-voiture"></h1>
+                <p class="details" id="details"></p>
+                <p class="prix" id="prix"></p>
+                <p id="reserver"></p>
+            </section>
+        </div>
+    </main>
+
+    <div id="footer"></div>
+
+    <script type="module">
+        import { supabase } from './js/supabase.js';
+        import { getProfilConnecte } from './js/nav.js';
+        import { formatPrix, afficherMessage } from './js/utils.js';
+
+        const id = Number(new URLSearchParams(location.search).get('id'));
+
+        const { data: voiture } = await supabase
+            .from('voitures')
+            .select('*, voitures_photos(url, ordre)')
+            .eq('id', id)
+            .order('ordre', { referencedTable: 'voitures_photos' })
+            .maybeSingle();
+
+        if (!voiture) {
+            afficherMessage('Voiture introuvable.');
+        } else {
+            const nom = `${voiture.marque} ${voiture.modele}`;
+            document.title = nom + ' - FindMyCar';
+            document.getElementById('nom-voiture').textContent = nom;
+            document.getElementById('details').textContent = `${voiture.annee} · ${voiture.places} places`;
+            document.getElementById('prix').textContent = formatPrix(voiture.prix_jour) + ' / jour';
+
+            const urls = voiture.voitures_photos.map(p => p.url);
+            if (urls.length > 0) {
+                creerGalerie(urls, nom);
+            } else {
+                // pas de photo : on cache la galerie et les infos prennent toute la place
+                document.getElementById('galerie').hidden = true;
+                document.getElementById('fiche').classList.add('sans-photo');
+            }
+
+            await afficherBoutonReserver(voiture);
+            document.getElementById('fiche').hidden = false;
+        }
+
+        function creerGalerie(urls, nom) {
+            const photo = document.getElementById('photo');
+            const miniatures = document.getElementById('miniatures');
+            const compteur = document.getElementById('compteur');
+            let actuelle = 0;
+
+            function montrer(i) {
+                // le modulo permet de revenir à la 1re photo après la dernière (et l'inverse)
+                actuelle = (i + urls.length) % urls.length;
+                photo.src = urls[actuelle];
+                photo.alt = `${nom} - photo ${actuelle + 1}`;
+                compteur.textContent = `${actuelle + 1} / ${urls.length}`;
+
+                miniatures.querySelectorAll('button').forEach((btn, j) => {
+                    btn.classList.toggle('active', j === actuelle);
+                });
+            }
+
+            // Avec une seule photo, pas besoin des flèches ni des miniatures
+            if (urls.length === 1) {
+                document.getElementById('precedente').hidden = true;
+                document.getElementById('suivante').hidden = true;
+                compteur.hidden = true;
+                miniatures.hidden = true;
+                montrer(0);
+                return;
+            }
+
+            urls.forEach((url, i) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.setAttribute('aria-label', 'Voir la photo ' + (i + 1));
+                btn.innerHTML = '<img alt="" loading="lazy">';
+                btn.querySelector('img').src = url;
+                btn.onclick = () => montrer(i);
+                miniatures.append(btn);
+            });
+
+            document.getElementById('precedente').onclick = () => montrer(actuelle - 1);
+            document.getElementById('suivante').onclick = () => montrer(actuelle + 1);
+
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'ArrowLeft') montrer(actuelle - 1);
+                if (e.key === 'ArrowRight') montrer(actuelle + 1);
+            });
+
+            montrer(0);
+        }
+
+        async function afficherBoutonReserver(voiture) {
+            const zone = document.getElementById('reserver');
+
+            if (!voiture.disponible) {
+                zone.textContent = 'Cette voiture n\'est pas disponible pour le moment.';
+                return;
+            }
+
+            const profil = await getProfilConnecte();
+            const lien = document.createElement('a');
+            lien.className = 'bouton';
+
+            if (!profil) {
+                lien.href = 'login.html';
+                lien.textContent = 'Se connecter pour réserver';
+            } else if (profil.role === 'admin') {
+                lien.href = 'admin.html';
+                lien.textContent = 'Gérer les demandes';
+            } else {
+                lien.href = 'accueil.html?voiture=' + voiture.id;
+                lien.textContent = 'Réserver cette voiture';
+            }
+            zone.append(lien);
+        }
+    </script>
+</body>
+</html>

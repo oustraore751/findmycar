@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connexion - FindMyCar</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="img/logo.svg" type="image/svg+xml">
+</head>
+<body>
+    <div id="header"></div>
+
+    <main>
+        <h1>Connexion</h1>
+
+        <form id="form-connexion" novalidate>
+            <label for="mail">Mail :</label>
+            <input type="email" id="mail" name="mail" placeholder="Entrez votre mail"
+                   autocomplete="email" required>
+
+            <label for="mdp">Mot de passe :</label>
+            <input type="password" id="mdp" name="mdp" placeholder="Entrez votre mot de passe"
+                   autocomplete="current-password" required>
+
+            <button type="submit" id="btn-connexion">Se connecter</button>
+        </form>
+
+        <p id="message" role="alert"></p>
+        <p>Pas encore de compte ? <a href="register.html">S'inscrire</a></p>
+    </main>
+
+    <div id="footer"></div>
+
+    <script type="module">
+        import { supabase } from './js/supabase.js';
+        import { getProfilConnecte } from './js/nav.js';
+        import { afficherMessage } from './js/utils.js';
+
+        const form = document.getElementById('form-connexion');
+        const bouton = document.getElementById('btn-connexion');
+
+        // L'admin va sur son espace, les clients sur le leur
+        function redirigerSelonRole(role) {
+            location.href = role === 'admin' ? 'admin.html' : 'accueil.html';
+        }
+
+        // Déjà connecté ? pas besoin de rester sur cette page
+        const profil = await getProfilConnecte();
+        if (profil) redirigerSelonRole(profil.role);
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const email = form.mail.value.trim();
+            const motDePasse = form.mdp.value;
+
+            if (!email || !motDePasse) {
+                afficherMessage('Merci de remplir le mail et le mot de passe.');
+                return;
+            }
+
+            bouton.disabled = true;
+            const { data, error } = await supabase.auth.signInWithPassword({ email, password: motDePasse });
+
+            if (error) {
+                bouton.disabled = false;
+                // message volontairement vague : on ne dit pas si c'est le mail ou le mot de passe qui est faux
+                afficherMessage('Mail ou mot de passe incorrect (ou compte non confirmé).');
+                form.mdp.value = '';
+                return;
+            }
+
+            const { data: infos } = await supabase
+                .from('profiles')
+                .select('role')
+                .eq('id', data.user.id)
+                .single();
+
+            redirigerSelonRole(infos?.role);
+        });
+    </script>
+</body>
+</html>

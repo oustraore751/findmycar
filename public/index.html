@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FindMyCar - Location de voitures</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="img/logo.svg" type="image/svg+xml">
+</head>
+<body>
+    //Page d'accueil : présentation + catalogue des voitures disponibles
+
+    <div id="header"></div>
+
+    <main>
+        <section class="hero">
+            <h1 id="titre">Bienvenue sur FindMyCar</h1>
+            <p id="intro">Choisissez une voiture, indiquez vos dates de location, et un
+                administrateur valide votre demande.</p>
+            <p id="actions"></p>
+        </section>
+
+        <h2>Nos voitures disponibles</h2>
+        <p id="message" role="alert"></p>
+        <ul id="liste-voitures"></ul>
+    </main>
+
+    <div id="footer"></div>
+
+    <script type="module">
+        import { supabase } from './js/supabase.js';
+        import { getProfilConnecte } from './js/nav.js';
+        import { formatPrix, afficherMessage } from './js/utils.js';
+
+        const actions = document.getElementById('actions');
+        const liste = document.getElementById('liste-voitures');
+
+        function ajouterBouton(texte, href, classe = 'bouton') {
+            const a = document.createElement('a');
+            a.href = href;
+            a.textContent = texte;
+            a.className = classe;
+            actions.append(a);
+        }
+
+        // Le texte d'accueil change si on est connecté
+        const profil = await getProfilConnecte();
+
+        if (!profil) {
+            ajouterBouton('Se connecter', 'login.html');
+            ajouterBouton('Créer un compte', 'register.html', 'bouton bouton-secondaire');
+        } else {
+            document.getElementById('titre').textContent = `Bonjour ${profil.prenom ?? ''} !`;
+            const intro = document.getElementById('intro');
+
+            if (profil.role === 'admin') {
+                intro.textContent = 'Vous êtes connecté en tant qu\'administrateur.';
+                ajouterBouton('Gérer les demandes', 'admin.html');
+            } else {
+                intro.textContent = 'Cliquez sur une voiture pour la réserver, ou suivez vos demandes dans votre espace.';
+                ajouterBouton('Mon espace', 'accueil.html');
+            }
+        }
+
+        // Catalogue (les photos sont triées par "ordre", la première sert de vignette)
+        const { data: voitures, error } = await supabase
+            .from('voitures')
+            .select('*, voitures_photos(url, ordre)')
+            .eq('disponible', true)
+            .order('prix_jour')
+            .order('ordre', { referencedTable: 'voitures_photos' });
+
+        if (error) {
+            afficherMessage('Impossible de charger le catalogue.');
+        } else if (voitures.length === 0) {
+            afficherMessage('Aucune voiture disponible pour le moment.');
+        }
+
+        for (const v of voitures ?? []) {
+            const carte = document.createElement('a');
+            carte.className = 'carte-voiture';
+            carte.href = 'voiture.html?id=' + v.id;
+
+            const photos = v.voitures_photos;
+            if (photos.length > 0) {
+                const img = document.createElement('img');
+                img.src = photos[0].url;
+                img.alt = `${v.marque} ${v.modele}`;
+                img.loading = 'lazy';
+                img.onerror = () => img.remove();   // lien cassé : on affiche la carte sans photo
+                carte.append(img);
+            }
+            if (photos.length > 1) {
+                const nb = document.createElement('span');
+                nb.className = 'nb-photos';
+                nb.textContent = '📷 ' + photos.length;
+                carte.append(nb);
+            }
+
+            const corps = document.createElement('div');
+            corps.className = 'corps';
+
+            const titre = document.createElement('h3');
+            titre.textContent = `${v.marque} ${v.modele}`;
+
+            const details = document.createElement('p');
+            details.className = 'details';
+            details.textContent = `${v.annee} · ${v.places} places`;
+
+            const prix = document.createElement('p');
+            prix.className = 'prix';
+            prix.textContent = formatPrix(v.prix_jour) + ' / jour';
+
+            const voir = document.createElement('span');
+            voir.className = 'voir';
+            voir.textContent = 'Voir la voiture →';
+
+            corps.append(titre, details, prix, voir);
+            carte.append(corps);
+
+            const li = document.createElement('li');
+            li.append(carte);
+            liste.append(li);
+        }
+    </script>
+</body>
+</html>

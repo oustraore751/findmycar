@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nous contacter - FindMyCar</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="img/logo.svg" type="image/svg+xml">
+</head>
+<body>
+    //Formulaire de contact, réservé aux clients connectés.
+        // Les messages arrivent dans la table messages_contact (onglet Messages de l'admin).
+
+    <div id="header"></div>
+
+    <main id="contenu" hidden>
+        <h1>Nous contacter</h1>
+        <p>Une question sur une location, un problème avec votre compte ?
+           Écrivez-nous, nous vous répondons sous 48 h.</p>
+
+        <div class="contact-grille">
+            <section class="contact-infos">
+                <h2>Nos coordonnées</h2>
+                <p><strong>Mail</strong><br>contact@findmycar.fr</p>
+                <p><strong>Téléphone</strong><br>01 23 45 67 89</p>
+                <p><strong>Horaires</strong><br>Du lundi au vendredi, 9 h - 18 h</p>
+            </section>
+
+            <section>
+                <h2>Envoyer un message</h2>
+                <form id="form-contact" novalidate>
+                    <label for="nom">Nom :</label>
+                    <input type="text" id="nom" name="nom" autocomplete="name" maxlength="100" required>
+
+                    <label for="mail">Mail :</label>
+                    <input type="email" id="mail" name="mail" autocomplete="email" maxlength="200" required>
+
+                    <label for="sujet">Sujet :</label>
+                    <input type="text" id="sujet" name="sujet" maxlength="150" required>
+
+                    <label for="texte">Message :</label>
+                    <textarea id="texte" name="texte" rows="6" maxlength="2000" required></textarea>
+
+                    <button type="submit" id="btn-envoyer">Envoyer</button>
+                </form>
+                <p id="message" role="alert"></p>
+            </section>
+        </div>
+    </main>
+
+    <div id="footer"></div>
+
+    <script type="module">
+        import { supabase } from './js/supabase.js';
+        import { exigerConnexion } from './js/nav.js';
+        import { afficherMessage } from './js/utils.js';
+
+        const form = document.getElementById('form-contact');
+        const bouton = document.getElementById('btn-envoyer');
+
+        const profil = await exigerConnexion('client');
+
+        if (profil) {
+            document.getElementById('contenu').hidden = false;
+
+            // on préremplit avec les infos du compte
+            form.nom.value = `${profil.prenom ?? ''} ${profil.nom ?? ''}`.trim();
+            form.mail.value = profil.email ?? '';
+
+            form.addEventListener('submit', envoyer);
+        }
+
+        async function envoyer(e) {
+            e.preventDefault();
+
+            const nouveauMessage = {
+                nom: form.nom.value.trim(),
+                email: form.mail.value.trim(),
+                sujet: form.sujet.value.trim(),
+                contenu: form.texte.value.trim(),
+                user_id: profil.id
+            };
+
+            if (!nouveauMessage.nom || !nouveauMessage.email || !nouveauMessage.sujet || !nouveauMessage.contenu) {
+                afficherMessage('Merci de remplir tous les champs.');
+                return;
+            }
+            if (!form.mail.checkValidity()) {
+                afficherMessage('Adresse mail invalide.');
+                return;
+            }
+
+            bouton.disabled = true;
+            const { error } = await supabase.from('messages_contact').insert(nouveauMessage);
+            bouton.disabled = false;
+
+            if (error) {
+                afficherMessage("Impossible d'envoyer le message : " + error.message);
+            } else {
+                afficherMessage('Merci ! Votre message a bien été envoyé.', false);
+                form.sujet.value = '';
+                form.texte.value = '';
+            }
+        }
+    </script>
+</body>
+</html>

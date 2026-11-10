@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Déconnexion - FindMyCar</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="img/logo.svg" type="image/svg+xml">
+</head>
+<body>
+    <main>
+        <h1>Déconnexion</h1>
+        <p id="message">Déconnexion en cours...</p>
+        <p><a href="login.html">Retour à la connexion</a></p>
+    </main>
+
+    <script type="module">
+        import { supabase } from './js/supabase.js';
+
+        const message = document.getElementById('message');
+        const { error } = await supabase.auth.signOut();
+
+        if (error) {
+            message.textContent = 'Erreur lors de la déconnexion : ' + error.message;
+        } else {
+            message.textContent = 'Vous êtes déconnecté. Redirection...';
+            // replace() pour que le bouton "retour" ne ramène pas sur cette page
+            setTimeout(() => location.replace('login.html'), 1500);
+        }
+    </script>
+</body>
+</html>

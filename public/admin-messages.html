@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Messages - Admin - FindMyCar</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="img/logo.svg" type="image/svg+xml">
+</head>
+<body>
+    //Admin : messages envoyés depuis la page contact
+
+    <div id="header"></div>
+
+    <main id="contenu" hidden>
+        <h1>Espace administrateur</h1>
+
+        <nav class="onglets">
+            <a href="admin.html">Demandes</a>
+            <a href="admin-vehicules.html">Véhicules</a>
+            <a href="admin-messages.html" class="actif">Messages</a>
+        </nav>
+
+        <p id="message" role="alert"></p>
+        <ul id="liste-messages" class="liste-messages"></ul>
+    </main>
+
+    <div id="footer"></div>
+
+    <script type="module">
+        import { supabase } from './js/supabase.js';
+        import { exigerConnexion } from './js/nav.js';
+        import { afficherMessage, creerBouton } from './js/utils.js';
+
+        const liste = document.getElementById('liste-messages');
+
+        const profil = await exigerConnexion('admin');
+        if (profil) {
+            document.getElementById('contenu').hidden = false;
+            chargerMessages();
+        }
+
+        // petit raccourci pour créer un élément avec du texte dedans
+        function element(balise, texte, classe) {
+            const el = document.createElement(balise);
+            el.textContent = texte;
+            if (classe) el.className = classe;
+            return el;
+        }
+
+        async function chargerMessages() {
+            const { data: messages, error } = await supabase
+                .from('messages_contact')
+                .select('id, nom, email, sujet, contenu, created_at')
+                .order('created_at', { ascending: false });
+
+            liste.replaceChildren();
+
+            if (error) {
+                afficherMessage('Impossible de charger les messages : ' + error.message);
+                return;
+            }
+            if (messages.length === 0) {
+                liste.append(element('li', 'Aucun message pour le moment.', 'vide'));
+                return;
+            }
+
+            for (const m of messages) {
+                const li = document.createElement('li');
+
+                const entete = element('div', '', 'entete-message');
+                entete.append(
+                    element('strong', m.sujet),
+                    element('span', new Date(m.created_at).toLocaleString('fr-FR'), 'date')
+                );
+
+                // lien pour répondre directement depuis sa messagerie
+                const mail = element('a', m.email);
+                mail.href = `mailto:${encodeURIComponent(m.email)}?subject=${encodeURIComponent('Re: ' + m.sujet)}`;
+
+                const auteur = element('p', m.nom + ' - ', 'auteur');
+                auteur.append(mail);
+
+                li.append(
+                    entete,
+                    auteur,
+                    element('p', m.contenu, 'contenu'),
+                    creerBouton('Supprimer', () => supprimer(m.id), 'btn-rouge')
+                );
+                liste.append(li);
+            }
+        }
+
+        async function supprimer(id) {
+            if (!confirm('Supprimer ce message ?')) return;
+
+            const { error } = await supabase.from('messages_contact').delete().eq('id', id);
+
+            if (error) {
+                afficherMessage('Impossible de supprimer : ' + error.message);
+            } else {
+                afficherMessage('Message supprimé.', false);
+                chargerMessages();
+            }
+        }
+    </script>
+</body>
+</html>

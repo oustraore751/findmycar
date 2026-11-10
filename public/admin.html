@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Espace admin - FindMyCar</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="img/logo.svg" type="image/svg+xml">
+</head>
+<body>
+    //Admin : liste des demandes de location, à accepter ou refuser
+
+    <div id="header"></div>
+
+    <main id="contenu" hidden>
+        <h1>Espace administrateur</h1>
+
+        <nav class="onglets">
+            <a href="admin.html" class="actif">Demandes</a>
+            <a href="admin-vehicules.html">Véhicules</a>
+            <a href="admin-messages.html">Messages</a>
+        </nav>
+
+        <label for="filtre">Afficher :</label>
+        <select id="filtre">
+            <option value="en_attente">Demandes en attente</option>
+            <option value="acceptee">Acceptées</option>
+            <option value="refusee">Refusées</option>
+            <option value="annulee">Annulées</option>
+            <option value="toutes">Toutes</option>
+        </select>
+
+        <p id="message" role="alert"></p>
+
+        <div class="tableau">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Client</th><th>Mail</th><th>Voiture</th><th>Du</th><th>Au</th>
+                        <th>Prix</th><th>Statut</th><th>Commentaire</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="liste-demandes"></tbody>
+            </table>
+        </div>
+    </main>
+
+    <div id="footer"></div>
+
+    <script type="module">
+        import { supabase } from './js/supabase.js';
+        import { exigerConnexion } from './js/nav.js';
+        import {
+            afficherMessage, formatDate, formatPrix, ajouterCellule,
+            ligneVide, creerBouton, creerBadge, LIBELLES_STATUT
+        } from './js/utils.js';
+
+        const filtre = document.getElementById('filtre');
+        const tbody = document.getElementById('liste-demandes');
+
+        const profil = await exigerConnexion('admin');
+        if (profil) {
+            document.getElementById('contenu').hidden = false;
+            filtre.addEventListener('change', chargerDemandes);
+            chargerDemandes();
+        }
+
+        async function chargerDemandes() {
+            let requete = supabase
+                .from('locations')
+                .select('id, date_debut, date_fin, prix_total, statut, commentaire_admin, '
+                      + 'profiles(nom, prenom, email), voitures(marque, modele)')
+                .order('created_at', { ascending: false });
+
+            if (filtre.value !== 'toutes') {
+                requete = requete.eq('statut', filtre.value);
+            }
+
+            const { data: demandes, error } = await requete;
+            tbody.replaceChildren();
+
+            if (error) {
+                afficherMessage('Impossible de charger les demandes.');
+                return;
+            }
+            if (demandes.length === 0) {
+                ligneVide(tbody, 'Aucune demande.', 9);
+                return;
+            }
+
+            for (const d of demandes) {
+                const client = d.profiles;
+                const ligne = document.createElement('tr');
+
+                ajouterCellule(ligne, client ? `${client.prenom ?? ''} ${client.nom ?? ''}` : '-');
+                ajouterCellule(ligne, client?.email ?? '-');
+                ajouterCellule(ligne, d.voitures ? `${d.voitures.marque} ${d.voitures.modele}` : '-');
+                ajouterCellule(ligne, formatDate(d.date_debut));
+                ajouterCellule(ligne, formatDate(d.date_fin));
+                ajouterCellule(ligne, formatPrix(d.prix_total));
+                ajouterCellule(ligne, creerBadge(LIBELLES_STATUT[d.statut], d.statut));
+                ajouterCellule(ligne, d.commentaire_admin ?? '');
+
+                const actions = ajouterCellule(ligne);
+                if (d.statut === 'en_attente') {
+                    actions.append(
+                        creerBouton('Accepter', () => accepter(d.id), 'btn-vert'),
+                        creerBouton('Refuser', () => refuser(d.id), 'btn-rouge')
+                    );
+                }
+
+                tbody.append(ligne);
+            }
+        }
+
+        async function accepter(id) {
+            // la base refuse si la voiture est déjà louée sur ces dates (trigger)
+            const { error } = await supabase
+                .from('locations')
+                .update({ statut: 'acceptee' })
+                .eq('id', id);
+
+            if (error) {
+                afficherMessage("Impossible d'accepter : " + error.message);
+            } else {
+                afficherMessage('Demande acceptée.', false);
+                chargerDemandes();
+            }
+        }
+
+        async function refuser(id) {
+            // le motif est facultatif, le client le verra dans son espace
+            const motif = prompt('Motif du refus (facultatif) :');
+            if (motif === null) return;
+
+            const { error } = await supabase
+                .from('locations')
+                .update({ statut: 'refusee', commentaire_admin: motif.trim() || null })
+                .eq('id', id);
+
+            if (error) {
+                afficherMessage('Impossible de refuser : ' + error.message);
+            } else {
+                afficherMessage('Demande refusée.', false);
+                chargerDemandes();
+            }
+        }
+    </script>
+</body>
+</html>

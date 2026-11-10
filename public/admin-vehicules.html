@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Véhicules - Admin - FindMyCar</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="img/logo.svg" type="image/svg+xml">
+</head>
+<body>
+    //Admin : ajouter / modifier / supprimer des véhicules et gérer leurs photos.
+        // Les photos sont envoyées dans le bucket "voitures" de Supabase Storage.
+    <div id="header"></div>
+
+    <main id="contenu" hidden>
+        <h1>Espace administrateur</h1>
+
+        <nav class="onglets">
+            <a href="admin.html">Demandes</a>
+            <a href="admin-vehicules.html" class="actif">Véhicules</a>
+            <a href="admin-messages.html">Messages</a>
+        </nav>
+
+        <p id="message" role="alert"></p>
+
+        //Le même formulaire sert pour l'ajout et la modification
+        <section>
+            <h2 id="titre-form">Ajouter un véhicule</h2>
+            <form id="form-vehicule" novalidate>
+                <div class="grille-form">
+                    <div>
+                        <label for="marque">Marque :</label>
+                        <input type="text" id="marque" name="marque" maxlength="50" required>
+                    </div>
+                    <div>
+                        <label for="modele">Modèle :</label>
+                        <input type="text" id="modele" name="modele" maxlength="50" required>
+                    </div>
+                    <div>
+                        <label for="annee">Année :</label>
+                        <input type="number" id="annee" name="annee" min="1990" step="1" required>
+                    </div>
+                    <div>
+                        <label for="places">Places :</label>
+                        <input type="number" id="places" name="places" min="1" max="9" step="1" value="5" required>
+                    </div>
+                    <div>
+                        <label for="prix">Prix par jour (€) :</label>
+                        <input type="number" id="prix" name="prix" min="1" step="0.01" required>
+                    </div>
+                    <div>
+                        <label for="photos">Photos (facultatif) :</label>
+                        <input type="file" id="photos" name="photos" multiple
+                               accept="image/jpeg,image/png,image/webp,image/avif">
+                    </div>
+                </div>
+
+                <label class="case">
+                    <input type="checkbox" id="disponible" name="disponible" checked>
+                    Disponible à la location
+                </label>
+
+                <div class="boutons">
+                    <button type="submit" id="btn-enregistrer">Ajouter le véhicule</button>
+                    <button type="button" id="btn-annuler" class="btn-gris" hidden>Annuler la modification</button>
+                </div>
+            </form>
+        </section>
+
+        <!-- S'affiche quand on clique sur "Photos" dans le tableau -->
+        <section id="zone-photos" hidden>
+            <h2 id="titre-photos">Photos</h2>
+            <p class="aide">La photo « Principale » est celle qui apparaît dans le catalogue.</p>
+            <ul id="liste-photos" class="grille-photos"></ul>
+
+            <label for="ajout-photos">Ajouter des photos :</label>
+            <input type="file" id="ajout-photos" multiple accept="image/jpeg,image/png,image/webp,image/avif">
+            <div class="boutons">
+                <button type="button" id="btn-fermer-photos" class="btn-gris">Fermer</button>
+            </div>
+        </section>
+
+        <section>
+            <h2>Parc de véhicules</h2>
+            <div class="tableau">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Photo</th><th>Véhicule</th><th>Année</th><th>Places</th>
+                            <th>Prix / jour</th><th>Statut</th><th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="liste-vehicules"></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <div id="footer"></div>
+
+    <script type="module">
+        import { supabase } from './js/supabase.js';
+        import { exigerConnexion } from './js/nav.js';
+        import { afficherMessage, formatPrix, ajouterCellule, ligneVide, creerBouton, creerBadge } from './js/utils.js';
+
+        const BUCKET = 'voitures';
+        const TAILLE_MAX = 5 * 1024 * 1024;   // 5 Mo, même limite que le bucket
+        const FORMATS = ['image/jpeg', 'image/png', 'image/webp', 'image/avif'];
+
+        const form = document.getElementById('form-vehicule');
+        const btnEnregistrer = document.getElementById('btn-enregistrer');
+        const btnAnnuler = document.getElementById('btn-annuler');
+        const tbody = document.getElementById('liste-vehicules');
+        const zonePhotos = document.getElementById('zone-photos');
+        const listePhotos = document.getElementById('liste-photos');
+        const ajoutPhotos = document.getElementById('ajout-photos');
+
+        let vehicules = [];
+        let idModifie = null;      // véhicule en cours de modification (null = mode ajout)
+        let idPhotosOuvert = null; // véhicule dont la zone photos est ouverte
+
+        const anneeMax = new Date().getFullYear() + 1;
+
+        const profil = await exigerConnexion('admin');
+        if (profil) {
+            form.annee.max = anneeMax;
+            document.getElementById('contenu').hidden = false;
+            chargerVehicules();
+        }
+
+        btnAnnuler.addEventListener('click', viderFormulaire);
+        document.getElementById('btn-fermer-photos').addEventListener('click', fermerPhotos);
+        form.addEventListener('submit', enregistrer);
+        ajoutPhotos.addEventListener('change', ajouterPhotos);
+
+
+        // ----- Liste des véhicules -----
+
+        async function chargerVehicules() {
+            const { data, error } = await supabase
+                .from('voitures')
+                .select('*, voitures_photos(id, url, ordre)')
+                .order('marque')
+                .order('modele')
+                .order('ordre', { referencedTable: 'voitures_photos' });
+
+            if (error) {
+                afficherMessage('Impossible de charger les véhicules : ' + error.message);
+                return;
+            }
+
+            vehicules = data;
+            afficherTableau();
+
+            // si la zone photos était ouverte, on la met à jour aussi
+            if (idPhotosOuvert !== null) ouvrirPhotos(idPhotosOuvert);
+        }
+
+        function afficherTableau() {
+            tbody.replaceChildren();
+
+            if (vehicules.length === 0) {
+                ligneVide(tbody, 'Aucun véhicule. Ajoutez-en un avec le formulaire ci-dessus.', 7);
+                return;
+            }
+
+            for (const v of vehicules) {
+                const ligne = document.createElement('tr');
+                const photo = v.voitures_photos[0];
+
+                if (photo) {
+                    const img = document.createElement('img');
+                    img.className = 'miniature-tableau';
+                    img.src = photo.url;
+                    img.alt = '';
+                    ajouterCellule(ligne, img);
+                } else {
+                    ajouterCellule(ligne, '-');
+                }
+
+                ajouterCellule(ligne, `${v.marque} ${v.modele}`);
+                ajouterCellule(ligne, v.annee);
+                ajouterCellule(ligne, v.places);
+                ajouterCellule(ligne, formatPrix(v.prix_jour));
+                ajouterCellule(ligne, v.disponible
+                    ? creerBadge('Disponible', 'acceptee')
+                    : creerBadge('Indisponible', 'annulee'));
+
+                ajouterCellule(ligne).append(
+                    creerBouton('Modifier', () => modifier(v)),
+                    creerBouton(`Photos (${v.voitures_photos.length})`, () => ouvrirPhotos(v.id)),
+                    creerBouton(v.disponible ? 'Rendre indisponible' : 'Rendre disponible',
+                                () => changerDisponibilite(v), 'btn-gris'),
+                    creerBouton('Supprimer', () => supprimer(v), 'btn-rouge')
+                );
+
+                tbody.append(ligne);
+            }
+        }
+
+
+        // ----- Ajout / modification -----
+
+        function modifier(v) {
+            idModifie = v.id;
+
+            form.marque.value = v.marque;
+            form.modele.value = v.modele;
+            form.annee.value = v.annee;
+            form.places.value = v.places;
+            form.prix.value = v.prix_jour;
+            form.disponible.checked = v.disponible;
+            form.photos.value = '';
+
+            document.getElementById('titre-form').textContent = `Modifier : ${v.marque} ${v.modele}`;
+            btnEnregistrer.textContent = 'Enregistrer les modifications';
+            btnAnnuler.hidden = false;
+            form.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function viderFormulaire() {
+            idModifie = null;
+            form.reset();
+
+            document.getElementById('titre-form').textContent = 'Ajouter un véhicule';
+            btnEnregistrer.textContent = 'Ajouter le véhicule';
+            btnAnnuler.hidden = true;
+        }
+
+        // Renvoie un message d'erreur, ou null si tout est bon
+        function verifier(v) {
+            if (!v.marque || !v.modele) return 'La marque et le modèle sont obligatoires.';
+            if (!Number.isInteger(v.annee) || v.annee < 1990 || v.annee > anneeMax) {
+                return `L'année doit être comprise entre 1990 et ${anneeMax}.`;
+            }
+            if (!Number.isInteger(v.places) || v.places < 1 || v.places > 9) {
+                return 'Le nombre de places doit être compris entre 1 et 9.';
+            }
+            if (!(v.prix_jour > 0)) return 'Le prix par jour doit être supérieur à 0.';
+            return null;
+        }
+
+        async function enregistrer(e) {
+            e.preventDefault();
+
+            const voiture = {
+                marque: form.marque.value.trim(),
+                modele: form.modele.value.trim(),
+                annee: Number(form.annee.value),
+                places: Number(form.places.value),
+                prix_jour: Number(form.prix.value),
+                disponible: form.disponible.checked
+            };
+            const fichiers = [...form.photos.files];
+
+            const erreur = verifier(voiture);
+            if (erreur) {
+                afficherMessage(erreur);
+                return;
+            }
+
+            btnEnregistrer.disabled = true;
+            const estUnAjout = idModifie === null;
+            let id = idModifie;
+
+            if (estUnAjout) {
+                const { data, error } = await supabase.from('voitures').insert(voiture).select('id').single();
+                if (error) {
+                    btnEnregistrer.disabled = false;
+                    afficherMessage("Impossible d'ajouter le véhicule : " + error.message);
+                    return;
+                }
+                id = data.id;
+            } else {
+                const { error } = await supabase.from('voitures').update(voiture).eq('id', id);
+                if (error) {
+                    btnEnregistrer.disabled = false;
+                    afficherMessage('Impossible de modifier le véhicule : ' + error.message);
+                    return;
+                }
+            }
+
+            const nbPhotos = await envoyerPhotos(id, fichiers);
+            btnEnregistrer.disabled = false;
+
+            let texte = `${voiture.marque} ${voiture.modele} ${estUnAjout ? 'ajouté' : 'modifié'}`;
+            texte += nbPhotos > 0 ? ` avec ${nbPhotos} photo(s).` : '.';
+
+            viderFormulaire();
+            await chargerVehicules();
+            afficherMessage(texte, false);
+        }
+
+        async function changerDisponibilite(v) {
+            const { error } = await supabase
+                .from('voitures')
+                .update({ disponible: !v.disponible })
+                .eq('id', v.id);
+
+            if (error) {
+                afficherMessage('Impossible de changer le statut : ' + error.message);
+                return;
+            }
+            afficherMessage(`${v.marque} ${v.modele} est maintenant ${v.disponible ? 'indisponible' : 'disponible'}.`, false);
+            chargerVehicules();
+        }
+
+        async function supprimer(v) {
+            if (!confirm(`Supprimer définitivement ${v.marque} ${v.modele} et toutes ses photos ?`)) return;
+
+            const { error } = await supabase.from('voitures').delete().eq('id', v.id);
+
+            // 23503 = erreur de clé étrangère : la voiture a encore des demandes de location
+            if (error?.code === '23503') {
+                afficherMessage(`${v.marque} ${v.modele} a des demandes de location, impossible de le supprimer. `
+                              + 'Rendez-le plutôt indisponible.');
+                return;
+            }
+            if (error) {
+                afficherMessage('Impossible de supprimer : ' + error.message);
+                return;
+            }
+
+            // les lignes de voitures_photos partent toutes seules (on delete cascade),
+            // mais il faut aussi supprimer les fichiers du bucket
+            const chemins = v.voitures_photos.map(p => cheminDansBucket(p.url)).filter(Boolean);
+            if (chemins.length > 0) await supabase.storage.from(BUCKET).remove(chemins);
+
+            if (idModifie === v.id) viderFormulaire();
+            if (idPhotosOuvert === v.id) fermerPhotos();
+
+            afficherMessage(`${v.marque} ${v.modele} a été supprimé.`, false);
+            chargerVehicules();
+        }
+
+
+        // ----- Photos -----
+
+        // Exemple d'URL : https://xxx.supabase.co/storage/v1/object/public/voitures/3/1731245678-ab12cd.jpg
+        // -> on récupère "3/1731245678-ab12cd.jpg", c'est ce que demande remove()
+        function cheminDansBucket(url) {
+            const debut = `/storage/v1/object/public/${BUCKET}/`;
+            const i = url.indexOf(debut);
+            if (i === -1) return null;
+            return decodeURIComponent(url.slice(i + debut.length));
+        }
+
+        // Les nouvelles photos se mettent après celles qui existent déjà
+        function ordreSuivant(idVoiture) {
+            const photos = vehicules.find(v => v.id === idVoiture)?.voitures_photos ?? [];
+            return Math.max(0, ...photos.map(p => p.ordre)) + 1;
+        }
+
+        // Envoie les fichiers dans le bucket et crée une ligne dans voitures_photos pour chacun.
+        // Renvoie le nombre de photos réellement ajoutées.
+        async function envoyerPhotos(idVoiture, fichiers) {
+            let ordre = ordreSuivant(idVoiture);
+            let nbAjoutees = 0;
+
+            for (const fichier of fichiers) {
+                if (!FORMATS.includes(fichier.type)) {
+                    afficherMessage(`« ${fichier.name} » ignoré : formats acceptés JPEG, PNG, WebP et AVIF.`);
+                    continue;
+                }
+                if (fichier.size > TAILLE_MAX) {
+                    afficherMessage(`« ${fichier.name} » ignoré : 5 Mo maximum.`);
+                    continue;
+                }
+
+                // nom unique pour ne jamais écraser un autre fichier, ex : 3/1731245678123-ab12cd.jpg
+                const extension = fichier.name.split('.').pop().toLowerCase();
+                const aleatoire = Math.random().toString(36).slice(2, 8);
+                const chemin = `${idVoiture}/${Date.now()}-${aleatoire}.${extension}`;
+
+                const envoi = await supabase.storage.from(BUCKET).upload(chemin, fichier, { contentType: fichier.type });
+                if (envoi.error) {
+                    afficherMessage(`Échec de l'envoi de « ${fichier.name} » : ${envoi.error.message}`);
+                    continue;
+                }
+
+                const url = supabase.storage.from(BUCKET).getPublicUrl(chemin).data.publicUrl;
+                const { error } = await supabase
+                    .from('voitures_photos')
+                    .insert({ voiture_id: idVoiture, url, ordre });
+
+                if (error) {
+                    // la ligne n'a pas pu être créée, on enlève le fichier pour ne pas le laisser traîner
+                    await supabase.storage.from(BUCKET).remove([chemin]);
+                    afficherMessage(`Photo « ${fichier.name} » non enregistrée : ${error.message}`);
+                    continue;
+                }
+
+                ordre++;
+                nbAjoutees++;
+            }
+            return nbAjoutees;
+        }
+
+        function ouvrirPhotos(idVoiture) {
+            const v = vehicules.find(x => x.id === idVoiture);
+            if (!v) {
+                fermerPhotos();
+                return;
+            }
+
+            idPhotosOuvert = idVoiture;
+            document.getElementById('titre-photos').textContent = `Photos : ${v.marque} ${v.modele}`;
+            listePhotos.replaceChildren();
+
+            if (v.voitures_photos.length === 0) {
+                const li = document.createElement('li');
+                li.className = 'vide';
+                li.textContent = 'Aucune photo pour ce véhicule.';
+                listePhotos.append(li);
+            }
+
+            v.voitures_photos.forEach((photo, i) => {
+                const img = document.createElement('img');
+                img.src = photo.url;
+                img.alt = 'Photo ' + (i + 1);
+
+                const boutons = document.createElement('div');
+                if (i === 0) {
+                    boutons.append(creerBadge('Principale', 'acceptee'));
+                } else {
+                    boutons.append(creerBouton('Principale', () => mettreEnPrincipale(v, photo)));
+                }
+                boutons.append(creerBouton('Supprimer', () => supprimerPhoto(photo), 'btn-rouge'));
+
+                const li = document.createElement('li');
+                li.append(img, boutons);
+                listePhotos.append(li);
+            });
+
+            zonePhotos.hidden = false;
+            zonePhotos.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function fermerPhotos() {
+            idPhotosOuvert = null;
+            zonePhotos.hidden = true;
+        }
+
+        async function ajouterPhotos() {
+            const fichiers = [...ajoutPhotos.files];
+            if (fichiers.length === 0 || idPhotosOuvert === null) return;
+
+            ajoutPhotos.disabled = true;
+            const nb = await envoyerPhotos(idPhotosOuvert, fichiers);
+            ajoutPhotos.value = '';
+            ajoutPhotos.disabled = false;
+
+            await chargerVehicules();
+            if (nb > 0) afficherMessage(`${nb} photo(s) ajoutée(s).`, false);
+        }
+
+        // La photo principale est celle qui a le plus petit "ordre",
+        // donc on lui donne un ordre plus petit que toutes les autres
+        async function mettreEnPrincipale(v, photo) {
+            const plusPetit = Math.min(...v.voitures_photos.map(p => p.ordre));
+
+            const { error } = await supabase
+                .from('voitures_photos')
+                .update({ ordre: plusPetit - 1 })
+                .eq('id', photo.id);
+
+            if (error) {
+                afficherMessage('Impossible de changer la photo principale : ' + error.message);
+                return;
+            }
+            await chargerVehicules();
+            afficherMessage('Photo principale modifiée.', false);
+        }
+
+        async function supprimerPhoto(photo) {
+            if (!confirm('Supprimer cette photo ?')) return;
+
+            const { error } = await supabase.from('voitures_photos').delete().eq('id', photo.id);
+            if (error) {
+                afficherMessage('Impossible de supprimer la photo : ' + error.message);
+                return;
+            }
+
+            const chemin = cheminDansBucket(photo.url);
+            if (chemin) await supabase.storage.from(BUCKET).remove([chemin]);
+
+            await chargerVehicules();
+            afficherMessage('Photo supprimée.', false);
+        }
+    </script>
+</body>
+</html>

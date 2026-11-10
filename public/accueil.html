@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mon espace - FindMyCar</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="img/logo.svg" type="image/svg+xml">
+</head>
+<body>
+    //Espace client : faire une demande de location et suivre ses demandes
+
+    <div id="header"></div>
+
+    //Visible qu'une fois en session
+    <main id="contenu" hidden>
+        <h1 id="titre">Mon espace</h1>
+
+        <section>
+            <h2>Faire une demande de location</h2>
+            <form id="form-location">
+                <label for="voiture">Voiture :</label>
+                <select id="voiture" name="voiture" required></select>
+
+                <label for="debut">Du :</label>
+                <input type="date" id="debut" name="debut" required>
+
+                <label for="fin">Au :</label>
+                <input type="date" id="fin" name="fin" required>
+
+                <p id="estimation"></p>
+                <button type="submit" id="btn-demande">Envoyer la demande</button>
+            </form>
+            <p id="message" role="alert"></p>
+        </section>
+
+        <section>
+            <h2>Mes demandes</h2>
+            <div class="tableau">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Voiture</th><th>Du</th><th>Au</th><th>Prix</th>
+                            <th>Statut</th><th>Commentaire</th><th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="liste-demandes"></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <div id="footer"></div>
+
+    <script type="module">
+        import { supabase } from './js/supabase.js';
+        import { exigerConnexion } from './js/nav.js';
+        import {
+            afficherMessage, formatDate, formatPrix, ajouterCellule,
+            ligneVide, creerBouton, creerBadge, LIBELLES_STATUT
+        } from './js/utils.js';
+
+        const form = document.getElementById('form-location');
+        const choixVoiture = document.getElementById('voiture');
+        const debut = document.getElementById('debut');
+        const fin = document.getElementById('fin');
+        const estimation = document.getElementById('estimation');
+        const bouton = document.getElementById('btn-demande');
+        const tbody = document.getElementById('liste-demandes');
+
+        const prixParVoiture = {};   // id de la voiture -> prix par jour, pour l'estimation
+
+        const profil = await exigerConnexion('client');
+        if (profil) demarrer();
+
+        async function demarrer() {
+            document.getElementById('titre').textContent = `Bonjour ${profil.prenom ?? ''}`;
+            document.getElementById('contenu').hidden = false;
+
+            // pas de réservation dans le passé
+            const aujourdhui = dateDuJour();
+            debut.min = aujourdhui;
+            fin.min = aujourdhui;
+
+            await chargerVoitures();
+
+            // Si on vient de la fiche d'une voiture (accueil.html?voiture=3), on la présélectionne
+            const voitureChoisie = new URLSearchParams(location.search).get('voiture');
+            if (voitureChoisie in prixParVoiture) {
+                choixVoiture.value = voitureChoisie;
+                form.scrollIntoView({ behavior: 'smooth' });
+                debut.focus({ preventScroll: true });
+            }
+
+            choixVoiture.addEventListener('change', calculerEstimation);
+            debut.addEventListener('change', calculerEstimation);
+            fin.addEventListener('change', calculerEstimation);
+            form.addEventListener('submit', envoyerDemande);
+
+            chargerDemandes();
+        }
+
+        // Date du jour au format AAAA-MM-JJ (en heure française, pas en UTC)
+        function dateDuJour() {
+            const d = new Date();
+            d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+            return d.toISOString().slice(0, 10);
+        }
+
+        async function chargerVoitures() {
+            const { data: voitures, error } = await supabase
+                .from('voitures')
+                .select('id, marque, modele, prix_jour')
+                .eq('disponible', true)
+                .order('marque');
+
+            if (error) {
+                afficherMessage('Impossible de charger les voitures.');
+                return;
+            }
+
+            for (const v of voitures) {
+                prixParVoiture[v.id] = Number(v.prix_jour);
+                const option = document.createElement('option');
+                option.value = v.id;
+                option.textContent = `${v.marque} ${v.modele} - ${formatPrix(v.prix_jour)} / jour`;
+                choixVoiture.append(option);
+            }
+        }
+
+        // Juste une indication pour le client, le vrai prix est calculé par la base
+        function calculerEstimation() {
+            const prixJour = prixParVoiture[choixVoiture.value];
+
+            if (!debut.value || !fin.value || !prixJour || fin.value < debut.value) {
+                estimation.textContent = '';
+                return;
+            }
+
+            const unJour = 24 * 60 * 60 * 1000;
+            const jours = Math.max((new Date(fin.value) - new Date(debut.value)) / unJour, 1);
+            estimation.textContent = `Prix estimé : ${formatPrix(jours * prixJour)} (${jours} jour(s))`;
+        }
+
+        async function envoyerDemande(e) {
+            e.preventDefault();
+
+            if (!choixVoiture.value || !debut.value || !fin.value) {
+                afficherMessage('Merci de choisir une voiture et des dates.');
+                return;
+            }
+            if (fin.value < debut.value) {
+                afficherMessage('La date de fin doit être après la date de début.');
+                return;
+            }
+
+            bouton.disabled = true;
+
+            // On envoie seulement la voiture et les dates :
+            // le prix et le statut sont pré-remplis par un trigger côté base
+            const { error } = await supabase.from('locations').insert({
+                user_id: profil.id,
+                voiture_id: Number(choixVoiture.value),
+                date_debut: debut.value,
+                date_fin: fin.value
+            });
+
+            bouton.disabled = false;
+
+            if (error) {
+                afficherMessage("Erreur lors de l'envoi : " + error.message);
+                return;
+            }
+
+            afficherMessage('Demande envoyée ! Elle est en attente de validation.', false);
+            form.reset();
+            estimation.textContent = '';
+            chargerDemandes();
+        }
+
+        async function chargerDemandes() {
+            const { data: demandes, error } = await supabase
+                .from('locations')
+                .select('id, date_debut, date_fin, prix_total, statut, commentaire_admin, voitures(marque, modele)')
+                .eq('user_id', profil.id)
+                .order('created_at', { ascending: false });
+
+            tbody.replaceChildren();
+
+            if (error) {
+                afficherMessage('Impossible de charger vos demandes.');
+                return;
+            }
+            if (demandes.length === 0) {
+                ligneVide(tbody, 'Aucune demande pour le moment.', 7);
+                return;
+            }
+
+            for (const d of demandes) {
+                const ligne = document.createElement('tr');
+                ajouterCellule(ligne, d.voitures ? `${d.voitures.marque} ${d.voitures.modele}` : '-');
+                ajouterCellule(ligne, formatDate(d.date_debut));
+                ajouterCellule(ligne, formatDate(d.date_fin));
+                ajouterCellule(ligne, formatPrix(d.prix_total));
+                ajouterCellule(ligne, creerBadge(LIBELLES_STATUT[d.statut], d.statut));
+                ajouterCellule(ligne, d.commentaire_admin ?? '');
+
+                // on ne peut annuler que ce qui n'a pas encore été traité
+                if (d.statut === 'en_attente') {
+                    ajouterCellule(ligne, creerBouton('Annuler', () => annuler(d.id), 'btn-rouge'));
+                } else {
+                    ajouterCellule(ligne);
+                }
+
+                tbody.append(ligne);
+            }
+        }
+
+        async function annuler(id) {
+            if (!confirm('Annuler cette demande ?')) return;
+
+            const { error } = await supabase
+                .from('locations')
+                .update({ statut: 'annulee' })
+                .eq('id', id);
+
+            if (error) {
+                afficherMessage("Impossible d'annuler : " + error.message);
+            } else {
+                afficherMessage('Demande annulée.', false);
+                chargerDemandes();
+            }
+        }
+    </script>
+</body>
+</html>

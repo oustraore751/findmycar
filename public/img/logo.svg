@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="FindMyCar">
+  <!-- Logo FindMyCar : un repère de carte (on "trouve") contenant une voiture -->
+  <path d="M32 2C19.3 2 9 12.1 9 24.6 9 41.5 32 62 32 62s23-20.5 23-37.4C55 12.1 44.7 2 32 2z" fill="#f59e0b"/>
+  <circle cx="32" cy="24.5" r="16.5" fill="#ffffff"/>
+  <!-- carrosserie -->
+  <path d="M20.5 28.5v-3.2c0-1 .7-1.9 1.7-2.1l2.6-.6 2.6-4.4c.5-.9 1.5-1.4 2.5-1.4h5.2c1 0 1.9.5 2.5 1.3l3 4.5 2.5.6c1 .2 1.7 1.1 1.7 2.1v3.2c0 .7-.6 1.3-1.3 1.3H21.8c-.7 0-1.3-.6-1.3-1.3z" fill="#2563eb"/>
+  <!-- vitres -->
+  <path d="M27.6 22.6l1.9-3.2c.2-.3.5-.5.9-.5h1.6v3.7zM33.6 18.9h1.6c.3 0 .7.2.9.4l2.2 3.3h-4.7z" fill="#dbeafe"/>
+  <!-- roues -->
+  <circle cx="25.5" cy="30" r="2.6" fill="#1e293b"/>
+  <circle cx="38.5" cy="30" r="2.6" fill="#1e293b"/>
+</svg>
